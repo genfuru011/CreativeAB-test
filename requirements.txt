@@ -1,2 +1,5 @@
 statsmodels
 streamlit
+seaborn
+matplotlib
+numpy
