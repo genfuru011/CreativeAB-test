@@ -1,5 +1,4 @@
 import streamlit as st
-import statsmodels.api as sm
 
 
 def run_ab_test():
