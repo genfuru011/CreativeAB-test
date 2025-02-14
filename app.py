@@ -47,7 +47,6 @@ def run_ab_test():
     stat_cv, p_cv = sm.stats.proportions_ztest(count_cv, nobs_impressions)
 
     st.write("## 統計検定の結果")
-
     # CTRの結果出力と優劣判定
     st.subheader("クリック率 (CTR) の検定")
     st.write("クリエイティブA CTR: {:.3%}".format(ctr_A))
@@ -104,8 +103,6 @@ def run_ab_test():
     st.write("CVRの差分: {:.3%}".format(delta_cvr))
     st.write("相対変化率: {:.1f}%".format(relative_change_cvr * 100))
 
-
-
     # 4. サンプルサイズ・パワー分析
     st.write("## サンプルサイズ・パワー分析 (有意水準5%, 検出力80%)")
     analysis = NormalIndPower()
@@ -129,12 +126,14 @@ def run_ab_test():
     st.write("## ベイズ推定 (Beta分布)")
 
     n_samples = 100000
-    # CTRのベイズ的推定
-    posterior_A_ctr = np.random.beta(clicks_A + 1, impressions_A - clicks_A + 1, n_samples)
-    posterior_B_ctr = np.random.beta(clicks_B + 1, impressions_B - clicks_B + 1, n_samples)
+    # --- CTR のベイズ推定：事前分布を Beta(2, 98) として設定 ---
+    alpha_prior_ctr = 2
+    beta_prior_ctr = 98
+    posterior_A_ctr = np.random.beta(clicks_A + alpha_prior_ctr, impressions_A - clicks_A + beta_prior_ctr, n_samples)
+    posterior_B_ctr = np.random.beta(clicks_B + alpha_prior_ctr, impressions_B - clicks_B + beta_prior_ctr, n_samples)
     prob_B_better_ctr = np.mean(posterior_B_ctr > posterior_A_ctr)
 
-    # CVRのベイズ的推定
+    # --- CVR のベイズ推定：従来通り無情報事前 Beta(1,1) を使用 ---
     posterior_A_cvr = np.random.beta(conversions_A + 1, impressions_A - conversions_A + 1, n_samples)
     posterior_B_cvr = np.random.beta(conversions_B + 1, impressions_B - conversions_B + 1, n_samples)
     prob_B_better_cvr = np.mean(posterior_B_cvr > posterior_A_cvr)
@@ -142,9 +141,8 @@ def run_ab_test():
     st.write(f"**CTR**: クリエイティブBがAより高い確率: {prob_B_better_ctr*100:.1f}%")
     st.write(f"**CVR**: クリエイティブBがAより高い確率: {prob_B_better_cvr*100:.1f}%")
 
-    # 5-1. 事後分布の可視化
+    # 5-1. 事後分布の可視化 (ベイズ推定) (CTR, CVR)
     st.write("### 事後分布の可視化(ベイズ推定） (CTR, CVR)")
-
     fig3, (ax3, ax4) = plt.subplots(1, 2, figsize=(12, 5))
     # CTR分布
     sns.kdeplot(posterior_A_ctr, fill=True, alpha=0.4, label='A', ax=ax3, color='blue')
@@ -152,14 +150,12 @@ def run_ab_test():
     ax3.set_title("Posterior Distributions (CTR)")
     ax3.set_xlabel("CTR")
     ax3.legend()
-
     # CVR分布
     sns.kdeplot(posterior_A_cvr, fill=True, alpha=0.4, label='A', ax=ax4, color='red')
     sns.kdeplot(posterior_B_cvr, fill=True, alpha=0.4, label='B', ax=ax4, color='gold')
     ax4.set_title("Posterior Distributions (CVR)")
     ax4.set_xlabel("CVR")
     ax4.legend()
-
     st.pyplot(fig3)
 
     def compute_hdi(samples, cred_mass=0.95):
@@ -182,7 +178,7 @@ def run_ab_test():
     hdi_ctr_A = compute_hdi(posterior_A_ctr, 0.95)
     hdi_ctr_B = compute_hdi(posterior_B_ctr, 0.95)
 
-    # HDIの表示とグラフへの重ね描き
+    # HDIの表示とグラフへの重ね描き (CTR)
     fig_hdi, ax_hdi = plt.subplots(figsize=(8, 4))
     sns.kdeplot(posterior_A_ctr, fill=True, alpha=0.4, label='Creative A', ax=ax_hdi, color='blue')
     sns.kdeplot(posterior_B_ctr, fill=True, alpha=0.4, label='Creative B', ax=ax_hdi, color='green')
@@ -206,7 +202,6 @@ def run_ab_test():
     fig_hdi_cvr, ax_hdi_cvr = plt.subplots(figsize=(8, 4))
     sns.kdeplot(posterior_A_cvr, fill=True, alpha=0.4, label='Creative A', ax=ax_hdi_cvr, color='red')
     sns.kdeplot(posterior_B_cvr, fill=True, alpha=0.4, label='Creative B', ax=ax_hdi_cvr, color='gold')
-
     # CVRのHDIをラインで表示
     ax_hdi_cvr.axvline(hdi_cvr_A[0], color='red', linestyle='--')
     ax_hdi_cvr.axvline(hdi_cvr_A[1], color='red', linestyle='--',
@@ -218,7 +213,6 @@ def run_ab_test():
     ax_hdi_cvr.set_xlabel("CVR")
     ax_hdi_cvr.legend()
     st.pyplot(fig_hdi_cvr)
-
 
 if __name__ == "__main__":
     run_ab_test()
