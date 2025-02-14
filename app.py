@@ -1,5 +1,5 @@
 import streamlit as st
-
+import statsmodels.api as sm
 
 def run_ab_test():
     st.title("A/Bテスト：CTR & CVR の統計検定")
