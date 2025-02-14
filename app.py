@@ -29,32 +29,54 @@ def run_ab_test():
     st.write("**バリアントB:** インプレッション: {}, クリック: {}, コンバージョン: {}"
              .format(impressions_B, clicks_B, conversions_B))
 
+    # クリック率 (CTR) の計算
+    ctr_A = clicks_A / impressions_A
+    ctr_B = clicks_B / impressions_B
+
+    # コンバージョン率 (CVR) の計算（コンバージョン数 ÷ インプレッション数）
+    cvr_A = conversions_A / impressions_A
+    cvr_B = conversions_B / impressions_B
+
     # クリック率 (CTR) の検定
     count_clicks = [clicks_A, clicks_B]
     nobs_impressions = [impressions_A, impressions_B]
     stat_click, p_click = sm.stats.proportions_ztest(count_clicks, nobs_impressions)
 
-    # コンバージョン率 (CVR) の検定（コンバージョン数 ÷ インプレッション数）
+    # コンバージョン率 (CVR) の検定
     count_cv = [conversions_A, conversions_B]
     stat_cv, p_cv = sm.stats.proportions_ztest(count_cv, nobs_impressions)
 
     st.write("## 統計検定の結果")
 
+    # CTRの結果出力と優劣判定
     st.subheader("クリック率 (CTR) の検定")
+    st.write("バリアントA CTR: {:.3%}".format(ctr_A))
+    st.write("バリアントB CTR: {:.3%}".format(ctr_B))
     st.write("z値: {:.3f}".format(stat_click))
     st.write("p値: {:.3f}".format(p_click))
     if p_click < 0.05:
-        st.success("CTR に統計的に有意な差があります")
+        # 統計的有意差がある場合、どちらが優れているか判定
+        if ctr_A > ctr_B:
+            st.success("統計的に有意な差があり、バリアントAの方がCTRが高いです。")
+        else:
+            st.success("統計的に有意な差があり、バリアントBの方がCTRが高いです。")
     else:
-        st.info("CTR に統計的な有意差は見られません")
+        st.info("CTR に統計的な有意差は見られません。")
 
+    # CVRの結果出力と優劣判定
     st.subheader("コンバージョン率 (CVR) の検定")
+    st.write("バリアントA CVR: {:.3%}".format(cvr_A))
+    st.write("バリアントB CVR: {:.3%}".format(cvr_B))
     st.write("z値: {:.3f}".format(stat_cv))
     st.write("p値: {:.3f}".format(p_cv))
     if p_cv < 0.05:
-        st.success("CVR に統計的に有意な差があります")
+        # 統計的有意差がある場合、どちらが優れているか判定
+        if cvr_A > cvr_B:
+            st.success("統計的に有意な差があり、バリアントAの方がCVRが高いです。")
+        else:
+            st.success("統計的に有意な差があり、バリアントBの方がCVRが高いです。")
     else:
-        st.info("CVR に統計的な有意差は見られません")
+        st.info("CVR に統計的な有意差は見られません。")
 
 
 if __name__ == "__main__":
