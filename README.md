@@ -11,6 +11,9 @@
 	•	Python 3.x　🐍
 	•	Streamlit　☁️
 	•	statsmodels　📈
+ 	•	seaborn
+	•	matplotlib
+	•	numpy
 
 # ライセンス
 
