@@ -125,7 +125,7 @@ def run_ab_test():
     # 5. ベイズ統計による代替検定 (Beta分布 + 事後分布の可視化)
     st.write("## ベイズ推定 (Beta分布)")
 
-    n_samples = 100000
+    n_samples = 500000
     # --- CTR のベイズ推定：事前分布を Beta(2, 98) として設定 ---
     alpha_prior_ctr = 2
     beta_prior_ctr = 98
