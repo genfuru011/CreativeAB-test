@@ -1,218 +1,253 @@
-import streamlit as st
-import statsmodels.api as sm
-from statsmodels.stats.proportion import proportion_confint, proportion_effectsize
-from statsmodels.stats.power import NormalIndPower
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
+import streamlit as st
+from scipy.stats import chi2_contingency
+from statsmodels.stats.power import NormalIndPower
+from statsmodels.stats.proportion import proportion_confint, proportion_effectsize
+
 
 def run_ab_test():
-    st.title("A/Bテスト：CTR & CVR の統計検定と拡張解析（ベイズ可視化付き）")
+    st.title("マルチクリエイティブ A/B テスト：CTR & CVR の統計検定と拡張解析（ベイズ可視化付き）")
 
-    # サイドバーで各クリエイティブのデータ入力
-    st.sidebar.header("クリエイティブAのデータ")
-    impressions_A = st.sidebar.number_input("インプレッション数 (A)", value=202787, step=1)
-    clicks_A = st.sidebar.number_input("クリック数 (A)", value=1107, step=1)
-    conversions_A = st.sidebar.number_input("コンバージョン数 (A)", value=19, step=1)
+    # クリエイティブ数の指定（最低2群）
+    num_creatives = st.sidebar.number_input("クリエイティブの数", min_value=2, value=2, step=1)
 
-    st.sidebar.header("クリエイティブBのデータ")
-    impressions_B = st.sidebar.number_input("インプレッション数 (B)", value=1401179, step=1)
-    clicks_B = st.sidebar.number_input("クリック数 (B)", value=10505, step=1)
-    conversions_B = st.sidebar.number_input("コンバージョン数 (B)", value=169, step=1)
+    creatives_data = []
+    group_labels = []
+    # 各クリエイティブのデータ入力（ラベルは A, B, C, ...）
+    for i in range(num_creatives):
+        label = chr(65 + i)  # 0->A, 1->B, ...
+        group_labels.append(label)
+        st.sidebar.header(f"クリエイティブ {label} のデータ")
+        impressions = st.sidebar.number_input(f"インプレッション数 ({label})", value=100000, step=1, key=f"imp_{label}")
+        clicks = st.sidebar.number_input(f"クリック数 ({label})", value=1000, step=1, key=f"click_{label}")
+        conversions = st.sidebar.number_input(f"コンバージョン数 ({label})", value=50, step=1, key=f"conv_{label}")
+        creatives_data.append({
+            "label": label,
+            "impressions": impressions,
+            "clicks": clicks,
+            "conversions": conversions
+        })
 
-    # 入力値の簡易チェック
-    if clicks_A > impressions_A or clicks_B > impressions_B:
-        st.error("クリック数はインプレッション数以下である必要があります。")
-        return
-    if conversions_A > impressions_A or conversions_B > impressions_B:
-        st.error("コンバージョン数はインプレッション数以下である必要があります。")
-        return
+    # 入力値のチェック
+    for data in creatives_data:
+        if data["clicks"] > data["impressions"]:
+            st.error(f"クリエイティブ {data['label']} のクリック数はインプレッション数以下である必要があります。")
+            return
+        if data["conversions"] > data["impressions"]:
+            st.error(f"クリエイティブ {data['label']} のコンバージョン数はインプレッション数以下である必要があります。")
+            return
 
+    # 入力データの表示
     st.write("## 入力されたデータ")
-    st.write(f"**クリエイティブA:** インプレッション: {impressions_A}, クリック: {clicks_A}, コンバージョン: {conversions_A}")
-    st.write(f"**クリエイティブB:** インプレッション: {impressions_B}, クリック: {clicks_B}, コンバージョン: {conversions_B}")
+    df = pd.DataFrame(creatives_data)
+    st.dataframe(df)
 
-    # 指標の計算
-    ctr_A = clicks_A / impressions_A
-    ctr_B = clicks_B / impressions_B
-    cvr_A = conversions_A / impressions_A
-    cvr_B = conversions_B / impressions_B
+    # 各指標の計算（CTR, CVR）
+    for data in creatives_data:
+        data["ctr"] = data["clicks"] / data["impressions"] if data["impressions"] > 0 else 0
+        data["cvr"] = data["conversions"] / data["impressions"] if data["impressions"] > 0 else 0
 
-    # Z検定（CTR, CVR）
-    count_clicks = [clicks_A, clicks_B]
-    nobs_impressions = [impressions_A, impressions_B]
-    stat_click, p_click = sm.stats.proportions_ztest(count_clicks, nobs_impressions)
+    st.write("## 各クリエイティブのCTRとCVR")
+    for data in creatives_data:
+        st.write(f"クリエイティブ {data['label']}: CTR = {data['ctr']:.3%}, CVR = {data['cvr']:.3%}")
 
-    count_cv = [conversions_A, conversions_B]
-    stat_cv, p_cv = sm.stats.proportions_ztest(count_cv, nobs_impressions)
-
-    st.write("## 統計検定の結果")
-    # CTRの結果出力と優劣判定
-    st.subheader("クリック率 (CTR) の検定")
-    st.write("クリエイティブA CTR: {:.3%}".format(ctr_A))
-    st.write("クリエイティブB CTR: {:.3%}".format(ctr_B))
-    st.write("z値: {:.3f}".format(stat_click))
-    st.write("p値: {:.3f}".format(p_click))
-    if p_click < 0.05:
-        if ctr_A > ctr_B:
-            st.success("統計的に有意な差があり、クリエイティブAの方がCTRが高いです。")
-        else:
-            st.success("統計的に有意な差があり、クリエイティブBの方がCTRが高いです。")
+    # 1. 全体的な検定（CTR）
+    # 各群について、[クリック数, インプレッション数-クリック数] の表を作成
+    table_ctr = [[data["clicks"], data["impressions"] - data["clicks"]] for data in creatives_data]
+    chi2_ctr, p_ctr, dof_ctr, expected_ctr = chi2_contingency(table_ctr)
+    st.write("## CTR の全体的な検定結果 (Chi-squared test)")
+    st.write(f"Chi2値: {chi2_ctr:.3f}, p値: {p_ctr:.3f}")
+    if p_ctr < 0.05:
+        best = max(creatives_data, key=lambda d: d["ctr"])
+        st.success(f"統計的に有意な差があり、最高のCTRはクリエイティブ {best['label']} です。")
     else:
         st.info("CTR に統計的な有意差は見られません。")
 
-    # CVRの結果出力と優劣判定
-    st.subheader("コンバージョン率 (CVR) の検定")
-    st.write("クリエイティブA CVR: {:.3%}".format(cvr_A))
-    st.write("クリエイティブB CVR: {:.3%}".format(cvr_B))
-    st.write("z値: {:.3f}".format(stat_cv))
-    st.write("p値: {:.3f}".format(p_cv))
-    if p_cv < 0.05:
-        if cvr_A > cvr_B:
-            st.success("統計的に有意な差があり、クリエイティブAの方がCVRが高いです。")
-        else:
-            st.success("統計的に有意な差があり、クリエイティブBの方がCVRが高いです。")
+    # 2. 全体的な検定（CVR）
+    table_cvr = [[data["conversions"], data["impressions"] - data["conversions"]] for data in creatives_data]
+    chi2_cvr, p_cvr, dof_cvr, expected_cvr = chi2_contingency(table_cvr)
+    st.write("## CVR の全体的な検定結果 (Chi-squared test)")
+    st.write(f"Chi2値: {chi2_cvr:.3f}, p値: {p_cvr:.3f}")
+    if p_cvr < 0.05:
+        best = max(creatives_data, key=lambda d: d["cvr"])
+        st.success(f"統計的に有意な差があり、最高のCVRはクリエイティブ {best['label']} です。")
     else:
         st.info("CVR に統計的な有意差は見られません。")
 
-    # 1. 信頼区間 (Wilson法)
-    ci_ctr_A = proportion_confint(clicks_A, impressions_A, alpha=0.05, method='wilson')
-    ci_ctr_B = proportion_confint(clicks_B, impressions_B, alpha=0.05, method='wilson')
-    ci_cvr_A = proportion_confint(conversions_A, impressions_A, alpha=0.05, method='wilson')
-    ci_cvr_B = proportion_confint(conversions_B, impressions_B, alpha=0.05, method='wilson')
-
+    # 3. 信頼区間 (Wilson法)
     st.write("## 信頼区間の計算 (95% CI, Wilson法)")
     st.write("**CTR**")
-    st.write("A: {:.3%} ~ {:.3%}".format(ci_ctr_A[0], ci_ctr_A[1]))
-    st.write("B: {:.3%} ~ {:.3%}".format(ci_ctr_B[0], ci_ctr_B[1]))
+    for data in creatives_data:
+        ci = proportion_confint(data["clicks"], data["impressions"], alpha=0.05, method='wilson')
+        st.write(f"{data['label']}: {ci[0]:.3%} ~ {ci[1]:.3%}")
     st.write("**CVR**")
-    st.write("A: {:.3%} ~ {:.3%}".format(ci_cvr_A[0], ci_cvr_A[1]))
-    st.write("B: {:.3%} ~ {:.3%}".format(ci_cvr_B[0], ci_cvr_B[1]))
+    for data in creatives_data:
+        ci = proportion_confint(data["conversions"], data["impressions"], alpha=0.05, method='wilson')
+        st.write(f"{data['label']}: {ci[0]:.3%} ~ {ci[1]:.3%}")
 
-    # 2. 効果サイズ (差分・相対変化率)
-    delta_ctr = ctr_A - ctr_B
-    relative_change_ctr = (delta_ctr / ctr_B) if ctr_B != 0 else np.nan
-    delta_cvr = cvr_A - cvr_B
-    relative_change_cvr = (delta_cvr / cvr_B) if cvr_B != 0 else np.nan
+    # 4. 効果サイズの評価（ペアワイズ比較）
+    st.write("## 効果サイズの評価 (ペアワイズ比較)")
+    comparisons = []
+    for i in range(len(creatives_data)):
+        for j in range(i + 1, len(creatives_data)):
+            data_i = creatives_data[i]
+            data_j = creatives_data[j]
+            delta_ctr = data_i["ctr"] - data_j["ctr"]
+            relative_change_ctr = (delta_ctr / data_j["ctr"]) if data_j["ctr"] != 0 else np.nan
+            delta_cvr = data_i["cvr"] - data_j["cvr"]
+            relative_change_cvr = (delta_cvr / data_j["cvr"]) if data_j["cvr"] != 0 else np.nan
+            comparisons.append({
+                "比較": f"{data_i['label']} vs {data_j['label']}",
+                "CTR 差分": delta_ctr,
+                "CTR 相対変化率": relative_change_ctr,
+                "CVR 差分": delta_cvr,
+                "CVR 相対変化率": relative_change_cvr
+            })
+    df_comp = pd.DataFrame(comparisons)
+    st.dataframe(df_comp.style.format({
+        "CTR 差分": "{:.3%}",
+        "CTR 相対変化率": "{:.1%}",
+        "CVR 差分": "{:.3%}",
+        "CVR 相対変化率": "{:.1%}"
+    }))
 
-    st.write("## 効果サイズの評価")
-    st.write("**CTRの効果サイズ**")
-    st.write("CTRの差分: {:.3%}".format(delta_ctr))
-    st.write("相対変化率: {:.1f}%".format(relative_change_ctr * 100))
-    st.write("**CVRの効果サイズ**")
-    st.write("CVRの差分: {:.3%}".format(delta_cvr))
-    st.write("相対変化率: {:.1f}%".format(relative_change_cvr * 100))
-
-    # 4. サンプルサイズ・パワー分析
-    st.write("## サンプルサイズ・パワー分析 (有意水準5%, 検出力80%)")
+    # 5. サンプルサイズ・パワー分析（ペアワイズ比較）
+    st.write("## サンプルサイズ・パワー分析 (有意水準5%, 検出力80%) - ペアワイズ比較")
     analysis = NormalIndPower()
-    # CTR 用の効果サイズ
-    try:
-        effect_size_ctr = proportion_effectsize(ctr_A, ctr_B)
-        required_n_ctr = analysis.solve_power(effect_size=effect_size_ctr, alpha=0.05, power=0.8, ratio=1)
-        st.write(f"CTRテストで必要なサンプルサイズ（各群）: {required_n_ctr:,.0f}")
-    except Exception as e:
-        st.write("CTRサンプルサイズ計算に失敗しました: ", e)
+    power_results = []
+    for i in range(len(creatives_data)):
+        for j in range(i + 1, len(creatives_data)):
+            data_i = creatives_data[i]
+            data_j = creatives_data[j]
+            # CTR のサンプルサイズ計算
+            try:
+                effect_size_ctr = proportion_effectsize(data_i["ctr"], data_j["ctr"])
+                required_n_ctr = analysis.solve_power(effect_size=effect_size_ctr, alpha=0.05, power=0.8, ratio=1)
+            except Exception as e:
+                required_n_ctr = None
+            # CVR のサンプルサイズ計算
+            try:
+                effect_size_cvr = proportion_effectsize(data_i["cvr"], data_j["cvr"])
+                required_n_cvr = analysis.solve_power(effect_size=effect_size_cvr, alpha=0.05, power=0.8, ratio=1)
+            except Exception as e:
+                required_n_cvr = None
+            power_results.append({
+                "比較": f"{data_i['label']} vs {data_j['label']}",
+                "CTR 必要サンプル数": required_n_ctr,
+                "CVR 必要サンプル数": required_n_cvr
+            })
+    df_power = pd.DataFrame(power_results)
+    st.dataframe(df_power.style.format({
+        "CTR 必要サンプル数": "{:,.0f}",
+        "CVR 必要サンプル数": "{:,.0f}"
+    }))
 
-    # CVR 用の効果サイズ
-    try:
-        effect_size_cvr = proportion_effectsize(cvr_A, cvr_B)
-        required_n_cvr = analysis.solve_power(effect_size=effect_size_cvr, alpha=0.05, power=0.8, ratio=1)
-        st.write(f"CVRテストで必要なサンプルサイズ（各群）: {required_n_cvr:,.0f}")
-    except Exception as e:
-        st.write("CVRサンプルサイズ計算に失敗しました: ", e)
-
-    # 5. ベイズ統計による代替検定 (Beta分布 + 事後分布の可視化)
+    # 6. ベイズ推定 (Beta分布)
     st.write("## ベイズ推定 (Beta分布)")
-
     n_samples = 500000
-    # --- CTR のベイズ推定：事前分布を Beta(2, 98) として設定 ---
+    # CTR：事前分布 Beta(2, 98) を使用
     alpha_prior_ctr = 2
     beta_prior_ctr = 98
-    posterior_A_ctr = np.random.beta(clicks_A + alpha_prior_ctr, impressions_A - clicks_A + beta_prior_ctr, n_samples)
-    posterior_B_ctr = np.random.beta(clicks_B + alpha_prior_ctr, impressions_B - clicks_B + beta_prior_ctr, n_samples)
-    prob_B_better_ctr = np.mean(posterior_B_ctr > posterior_A_ctr)
+    for data in creatives_data:
+        data["posterior_ctr"] = np.random.beta(data["clicks"] + alpha_prior_ctr,
+                                               data["impressions"] - data["clicks"] + beta_prior_ctr,
+                                               n_samples)
+    # CVR：事前分布 Beta(1, 1) を使用
+    for data in creatives_data:
+        data["posterior_cvr"] = np.random.beta(data["conversions"] + 1,
+                                               data["impressions"] - data["conversions"] + 1,
+                                               n_samples)
 
-    # --- CVR のベイズ推定：従来通り無情報事前 Beta(1,1) を使用 ---
-    posterior_A_cvr = np.random.beta(conversions_A + 1, impressions_A - conversions_A + 1, n_samples)
-    posterior_B_cvr = np.random.beta(conversions_B + 1, impressions_B - conversions_B + 1, n_samples)
-    prob_B_better_cvr = np.mean(posterior_B_cvr > posterior_A_cvr)
+    # 各群が最高となる確率の算出（CTR）
+    all_posteriors_ctr = np.array([data["posterior_ctr"] for data in creatives_data])
+    best_ctr_counts = np.argmax(all_posteriors_ctr, axis=0)
+    prob_best_ctr = {}
+    st.write("### CTR: 各クリエイティブが最高である確率")
+    for idx, label in enumerate(group_labels):
+        prob_best_ctr[label] = np.mean(best_ctr_counts == idx)
+        st.write(f"クリエイティブ {label}: {prob_best_ctr[label] * 100:.1f}%")
 
-    st.write(f"**CTR**: クリエイティブBがAより高い確率: {prob_B_better_ctr*100:.1f}%")
-    st.write(f"**CVR**: クリエイティブBがAより高い確率: {prob_B_better_cvr*100:.1f}%")
+    # 各群が最高となる確率の算出（CVR）
+    all_posteriors_cvr = np.array([data["posterior_cvr"] for data in creatives_data])
+    best_cvr_counts = np.argmax(all_posteriors_cvr, axis=0)
+    prob_best_cvr = {}
+    st.write("### CVR: 各クリエイティブが最高である確率")
+    for idx, label in enumerate(group_labels):
+        prob_best_cvr[label] = np.mean(best_cvr_counts == idx)
+        st.write(f"クリエイティブ {label}: {prob_best_cvr[label] * 100:.1f}%")
 
-    # 5-1. 事後分布の可視化 (ベイズ推定) (CTR, CVR)
-    st.write("### 事後分布の可視化(ベイズ推定） (CTR, CVR)")
-    fig3, (ax3, ax4) = plt.subplots(1, 2, figsize=(12, 5))
-    # CTR分布
-    sns.kdeplot(posterior_A_ctr, fill=True, alpha=0.4, label='A', ax=ax3, color='blue')
-    sns.kdeplot(posterior_B_ctr, fill=True, alpha=0.4, label='B', ax=ax3, color='green')
-    ax3.set_title("Posterior Distributions (CTR)")
-    ax3.set_xlabel("CTR")
-    ax3.legend()
-    # CVR分布
-    sns.kdeplot(posterior_A_cvr, fill=True, alpha=0.4, label='A', ax=ax4, color='red')
-    sns.kdeplot(posterior_B_cvr, fill=True, alpha=0.4, label='B', ax=ax4, color='gold')
-    ax4.set_title("Posterior Distributions (CVR)")
-    ax4.set_xlabel("CVR")
-    ax4.legend()
-    st.pyplot(fig3)
+    # 7. 事後分布の可視化（CTR, CVR）
+    st.write("### 事後分布の可視化 (ベイズ推定）")
+    colors = sns.color_palette("tab10", n_colors=num_creatives)
 
+    # CTRの事後分布プロット
+    fig_ctr, ax_ctr = plt.subplots(figsize=(8, 5))
+    for i, data in enumerate(creatives_data):
+        sns.kdeplot(data["posterior_ctr"], fill=True, alpha=0.4,
+                    label=f"Creative {data['label']}", ax=ax_ctr, color=colors[i])
+    ax_ctr.set_title("Posterior Distributions (CTR)")
+    ax_ctr.set_xlabel("CTR")
+    ax_ctr.legend()
+    st.pyplot(fig_ctr)
+
+    # CVRの事後分布プロット
+    fig_cvr, ax_cvr = plt.subplots(figsize=(8, 5))
+    for i, data in enumerate(creatives_data):
+        sns.kdeplot(data["posterior_cvr"], fill=True, alpha=0.4,
+                    label=f"Creative {data['label']}", ax=ax_cvr, color=colors[i])
+    ax_cvr.set_title("Posterior Distributions (CVR)")
+    ax_cvr.set_xlabel("CVR")
+    ax_cvr.legend()
+    st.pyplot(fig_cvr)
+
+    # 8. HDI (Highest Density Interval) の計算とプロット
     def compute_hdi(samples, cred_mass=0.95):
         """
-        与えられたサンプルからHDIを計算する関数。
-        samples: 1次元のサンプル配列
-        cred_mass: 信頼度（例: 0.95）
+        与えられたサンプルからHDIを計算する関数
         """
         sorted_samples = np.sort(samples)
-        n_samples = len(sorted_samples)
-        interval_idx_inc = int(np.floor(cred_mass * n_samples))
-        n_intervals = n_samples - interval_idx_inc
+        n_samples_sorted = len(sorted_samples)
+        interval_idx_inc = int(np.floor(cred_mass * n_samples_sorted))
+        n_intervals = n_samples_sorted - interval_idx_inc
         interval_width = sorted_samples[interval_idx_inc:] - sorted_samples[:n_intervals]
         min_idx = np.argmin(interval_width)
         hdi_lower = sorted_samples[min_idx]
         hdi_upper = sorted_samples[min_idx + interval_idx_inc]
         return hdi_lower, hdi_upper
 
-    # 例: CTRの事後分布を用いて95% HDIを計算
-    hdi_ctr_A = compute_hdi(posterior_A_ctr, 0.95)
-    hdi_ctr_B = compute_hdi(posterior_B_ctr, 0.95)
+    # CTRのHDIプロット
+    st.write("### 事後分布の95% HDI (CTR)")
+    fig_hdi_ctr, ax_hdi_ctr = plt.subplots(figsize=(8, 5))
+    for i, data in enumerate(creatives_data):
+        hdi = compute_hdi(data["posterior_ctr"], 0.95)
+        sns.kdeplot(data["posterior_ctr"], fill=True, alpha=0.4,
+                    label=f"Creative {data['label']}", ax=ax_hdi_ctr, color=colors[i])
+        ax_hdi_ctr.axvline(hdi[0], color=colors[i], linestyle='--')
+        ax_hdi_ctr.axvline(hdi[1], color=colors[i], linestyle='--',
+                           label=f"{data['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
+    ax_hdi_ctr.set_title("Posterior Distributions 95% HDI (CTR)")
+    ax_hdi_ctr.set_xlabel("CTR")
+    ax_hdi_ctr.legend()
+    st.pyplot(fig_hdi_ctr)
 
-    # HDIの表示とグラフへの重ね描き (CTR)
-    fig_hdi, ax_hdi = plt.subplots(figsize=(8, 4))
-    sns.kdeplot(posterior_A_ctr, fill=True, alpha=0.4, label='Creative A', ax=ax_hdi, color='blue')
-    sns.kdeplot(posterior_B_ctr, fill=True, alpha=0.4, label='Creative B', ax=ax_hdi, color='green')
-    # HDIをラインで表示
-    ax_hdi.axvline(hdi_ctr_A[0], color='blue', linestyle='--')
-    ax_hdi.axvline(hdi_ctr_A[1], color='blue', linestyle='--',
-                   label=f"A 95% HDI: {hdi_ctr_A[0]:.3%}~{hdi_ctr_A[1]:.3%}")
-    ax_hdi.axvline(hdi_ctr_B[0], color='green', linestyle='--')
-    ax_hdi.axvline(hdi_ctr_B[1], color='green', linestyle='--',
-                   label=f"B 95% HDI: {hdi_ctr_B[0]:.3%}~{hdi_ctr_B[1]:.3%}")
-    ax_hdi.set_title("Posterior Distributions 95% HDI (CTR)")
-    ax_hdi.set_xlabel("CTR")
-    ax_hdi.legend()
-    st.pyplot(fig_hdi)
-
-    # CVR版 HDI の計算
-    hdi_cvr_A = compute_hdi(posterior_A_cvr, 0.95)
-    hdi_cvr_B = compute_hdi(posterior_B_cvr, 0.95)
-
-    # HDIの表示とグラフへの重ね描き（CVR版）
-    fig_hdi_cvr, ax_hdi_cvr = plt.subplots(figsize=(8, 4))
-    sns.kdeplot(posterior_A_cvr, fill=True, alpha=0.4, label='Creative A', ax=ax_hdi_cvr, color='red')
-    sns.kdeplot(posterior_B_cvr, fill=True, alpha=0.4, label='Creative B', ax=ax_hdi_cvr, color='gold')
-    # CVRのHDIをラインで表示
-    ax_hdi_cvr.axvline(hdi_cvr_A[0], color='red', linestyle='--')
-    ax_hdi_cvr.axvline(hdi_cvr_A[1], color='red', linestyle='--',
-                       label=f"A 95% HDI: {hdi_cvr_A[0]:.3%} ~ {hdi_cvr_A[1]:.3%}")
-    ax_hdi_cvr.axvline(hdi_cvr_B[0], color='gold', linestyle='--')
-    ax_hdi_cvr.axvline(hdi_cvr_B[1], color='gold', linestyle='--',
-                       label=f"B 95% HDI: {hdi_cvr_B[0]:.3%} ~ {hdi_cvr_B[1]:.3%}")
+    # CVRのHDIプロット
+    st.write("### 事後分布の95% HDI (CVR)")
+    fig_hdi_cvr, ax_hdi_cvr = plt.subplots(figsize=(8, 5))
+    for i, data in enumerate(creatives_data):
+        hdi = compute_hdi(data["posterior_cvr"], 0.95)
+        sns.kdeplot(data["posterior_cvr"], fill=True, alpha=0.4,
+                    label=f"Creative {data['label']}", ax=ax_hdi_cvr, color=colors[i])
+        ax_hdi_cvr.axvline(hdi[0], color=colors[i], linestyle='--')
+        ax_hdi_cvr.axvline(hdi[1], color=colors[i], linestyle='--',
+                           label=f"{data['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
     ax_hdi_cvr.set_title("Posterior Distributions 95% HDI (CVR)")
     ax_hdi_cvr.set_xlabel("CVR")
     ax_hdi_cvr.legend()
     st.pyplot(fig_hdi_cvr)
+
 
 if __name__ == "__main__":
     run_ab_test()
