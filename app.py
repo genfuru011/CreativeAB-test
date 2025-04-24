@@ -150,29 +150,31 @@ def run_ab_test():
         return sorted_samples[min_idx], sorted_samples[min_idx + interval_idx_inc]
 
     def plot_hdi(metric):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        for i, d in enumerate(creatives_data):
-            hdi = compute_hdi(d[f"posterior_{metric}"], 0.95)
-            # KDEプロットを描画し、その線の色を取得
-            kde = sns.kdeplot(
-                d[f"posterior_{metric}"],
-                fill=True,
-                alpha=0.4,
-                label=f"Creative {d['label']}",
-                ax=ax
-            )
-            lines = kde.get_lines()
-            if lines:  # 線が存在すればその色を取得
-                color = lines[-1].get_color()
-            else:
-                color = "black"  # 安全策としてデフォルト色
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for i, d in enumerate(creatives_data):
+        hdi = compute_hdi(d[f"posterior_{metric}"], 0.95)
 
-            ax.axvline(hdi[0], color=color, linestyle='--')
-            ax.axvline(hdi[1], color=color, linestyle='--', label=f"{d['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
-        ax.set_title(f"Posterior Distributions 95% HDI ({metric.upper()})")
-        ax.set_xlabel(metric.upper())
-        ax.legend()
-        st.pyplot(fig)
+        # KDEプロットして、その色を取得
+        kdeplot_result = sns.kdeplot(
+            d[f"posterior_{metric}"],
+            fill=True,
+            alpha=0.4,
+            label=f"Creative {d['label']}",
+            ax=ax
+        )
+
+        # get_lines() は Axes に付属する全てのLine2Dを返す
+        # 最後に追加された線（kdeの輪郭線）から色を取得する
+        lines = ax.get_lines()
+        color = lines[-1].get_color() if lines else 'black'
+
+        ax.axvline(hdi[0], color=color, linestyle='--')
+        ax.axvline(hdi[1], color=color, linestyle='--', label=f"{d['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
+    
+    ax.set_title(f"Posterior Distributions 95% HDI ({metric.upper()})")
+    ax.set_xlabel(metric.upper())
+    ax.legend()
+    st.pyplot(fig)
 
 
 if __name__ == "__main__":
