@@ -153,16 +153,27 @@ def run_ab_test():
         fig, ax = plt.subplots(figsize=(8, 5))
         for i, d in enumerate(creatives_data):
             hdi = compute_hdi(d[f"posterior_{metric}"], 0.95)
-            sns.kdeplot(d[f"posterior_{metric}"], fill=True, alpha=0.4, label=f"Creative {d['label']}", ax=ax)
-            ax.axvline(hdi[0], color=ax.lines[-1].get_color(), linestyle='--')
-            ax.axvline(hdi[1], color=ax.lines[-1].get_color(), linestyle='--', label=f"{d['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
+            # KDEプロットを描画し、その線の色を取得
+            kde = sns.kdeplot(
+                d[f"posterior_{metric}"],
+                fill=True,
+                alpha=0.4,
+                label=f"Creative {d['label']}",
+                ax=ax
+            )
+            lines = kde.get_lines()
+            if lines:  # 線が存在すればその色を取得
+                color = lines[-1].get_color()
+            else:
+                color = "black"  # 安全策としてデフォルト色
+
+            ax.axvline(hdi[0], color=color, linestyle='--')
+            ax.axvline(hdi[1], color=color, linestyle='--', label=f"{d['label']} 95% HDI: {hdi[0]:.3%} ~ {hdi[1]:.3%}")
         ax.set_title(f"Posterior Distributions 95% HDI ({metric.upper()})")
         ax.set_xlabel(metric.upper())
         ax.legend()
         st.pyplot(fig)
 
-    plot_hdi("ctr")
-    plot_hdi("cvr")
 
 if __name__ == "__main__":
     run_ab_test()
